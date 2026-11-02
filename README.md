@@ -17,3 +17,11 @@ pnpm typecheck
 pnpm test
 pnpm exec wrangler deploy --dry-run
 ```
+
+## Device location
+
+Use my location requests a single browser location fix after a click and browser permission. The page displays coordinates and accuracy, and Open map uses that location. Refresh location requests a fresh fix. Denied, unavailable, and timeout states allow retry; IP details remain available.
+
+Device coordinates stay in page memory and are never sent to the Worker or its logs. Opening the map shares those coordinates with OpenStreetMap. Reloading clears them. Browser location may use GPS, Wi-Fi, or other device signals; it does not provide a street address. No reverse-geocoding service or new dependency is used.
+
+The page requires HTTPS (localhost also works). Cloudflare zone security challenges occur before this Worker and must be managed separately.
