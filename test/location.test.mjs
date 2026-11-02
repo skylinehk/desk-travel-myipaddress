@@ -71,7 +71,7 @@ for (const save of [async () => { throw new Error('Offline'); }, async () => ({ 
     const { elements: e } = await page({ getCurrentPosition(ok) { success = ok; } }, save);
     await success({ coords: { latitude: 0, longitude: 0, accuracy: 1 } });
     assert.equal(e['device-location'].hidden, false);
-    assert.equal(e['location-status'].textContent, 'Location not saved · reload to retry');
+    assert.equal(e['location-status'].textContent, 'Location not saved');
   });
 }
 

@@ -92,7 +92,7 @@ const render = (request: Request): Response => {
 <div class="card-head"><span>Connection details</span><span class="status"><span class="dot"></span>Logged</span></div>
 <dl class="rows">${rowMarkup}<div class="row" id="device-location" hidden><dt>Device location</dt><dd role="status"><span id="device-coordinates"></span><span class="accuracy" id="device-accuracy"></span></dd></div></dl>
 <div class="actions"><button class="button" id="copy" type="button">Copy IP</button><a class="button" id="map" href="${escapeHtml(mapUrl)}" target="_blank" rel="noreferrer">Open map</a></div>
-<p class="location-status" id="location-status" role="status">If allowed, location is logged to Cloudflare.</p>
+<p class="location-status" id="location-status" role="status">Locating…</p>
 </section>
 </main>
 <script>
@@ -127,10 +127,10 @@ if (!navigator.geolocation) {
       if (!response.ok || (await response.json()).logged !== true) throw new Error('Not logged');
       locationStatus.textContent = 'Location logged';
     } catch {
-      locationStatus.textContent = 'Location not saved · reload to retry';
+      locationStatus.textContent = 'Location not saved';
     }
   }, (error) => {
-    locationStatus.textContent = error.code === 1 ? 'Location blocked · allow in browser settings' : error.code === 3 ? 'Location timed out · reload to retry' : 'Location unavailable · reload to retry';
+    locationStatus.textContent = error.code === 1 ? 'Location blocked' : error.code === 3 ? 'Location timed out' : 'Location unavailable';
   }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
 }
 </script>

@@ -20,7 +20,7 @@ pnpm exec wrangler deploy --dry-run
 
 ## Device location
 
-The page automatically requests one browser location fix on load. The browser requires permission (or an existing grant); the page discloses that allowed location is logged to Cloudflare. No location button, polling, or automatic retries are used. Denial leaves IP details available.
+The page automatically requests one browser location fix on load. The browser requires permission (or an existing grant); the UI shows only a brief location status. No location button, polling, or automatic retries are used. Denial leaves IP details available.
 
 After permission, coordinates and accuracy appear and are posted once to the same-origin `/myipaddress/location` endpoint. The Worker validates numeric ranges, JSON content type, origin, and a 1 KiB body limit, then emits `myipaddress.location` to Cloudflare Worker observability with the connecting IP and server timestamp. A successful response changes the status to Location logged; failures stay visible and require reload to retry. Logs use the existing observability retention and sampling settings, not a permanent database.
 
