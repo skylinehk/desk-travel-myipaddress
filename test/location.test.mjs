@@ -1,24 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runInNewContext } from 'node:vm';
+import { page } from '../support/browser.mjs';
 import worker from '../src/index.ts';
-
-async function page(geolocation, save = async () => ({ ok: true, json: async () => ({ logged: true }) })) {
-  const response = await worker.fetch(new Request('https://desk.travel/myipaddress'));
-  const html = await response.text();
-  const elements = Object.fromEntries(['copy', 'location-status', 'device-location', 'device-coordinates', 'device-accuracy', 'map'].map(id => [id, {
-    hidden: true, disabled: false, textContent: '', href: 'https://www.openstreetmap.org/',
-    addEventListener(type, handler) { this[type] = handler; },
-  }]));
-  let timer;
-  runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], {
-    document: { getElementById: id => elements[id] },
-    fetch: save,
-    navigator: { geolocation, clipboard: { writeText: async () => { throw new Error('Denied'); } } },
-    setTimeout: callback => { timer = callback; },
-  });
-  return { elements, response, resetCopy: () => timer() };
-}
 
 test('location requests automatically once and posts only after permission success', async () => {
   let success, calls = 0, saves = 0;
@@ -31,7 +14,11 @@ test('location requests automatically once and posts only after permission succe
     saves++;
     assert.equal(url, '/myipaddress/location');
     assert.equal(options.method, 'POST');
-    assert.deepEqual(JSON.parse(options.body), { latitude: 51.5, longitude: -0.12, accuracy: 12.3 });
+    const payload = JSON.parse(options.body);
+    assert.equal(payload.latitude, 51.5);
+    assert.equal(payload.longitude, -0.12);
+    assert.equal(payload.accuracy, 12.3);
+    assert.ok(payload.visitId && payload.sessionId && payload.eventId);
     return { ok: true, json: async () => ({ logged: true }) };
   });
   assert.equal(calls, 1);
@@ -49,7 +36,14 @@ test('location requests automatically once and posts only after permission succe
 
 for (const [code, message] of [[1, 'Location blocked'], [2, 'Location unavailable'], [3, 'Location timed out']]) {
   test(`location error ${code} preserves IP map and never saves`, async () => {
-    const { elements: e } = await page({ getCurrentPosition(ok, fail) { fail({ code }); } }, () => assert.fail('Must not save after denial/error'));
+    const { elements: e } = await page({ getCurrentPosition(ok, fail) { fail({ code }); } }, async (url, options) => {
+      assert.equal(url, '/myipaddress/events');
+      const data = JSON.parse(options.body);
+      assert.equal(data.event, 'location_error');
+      assert.equal('latitude' in data, false);
+      assert.ok(['denied', 'timeout', 'unavailable'].includes(data.outcome));
+      return { ok: true, json: async () => ({ logged: true }) };
+    });
     assert.ok(e['location-status'].textContent.startsWith(message));
     assert.equal(e['device-location'].hidden, true);
     assert.equal(e.map.href, 'https://www.openstreetmap.org/');
