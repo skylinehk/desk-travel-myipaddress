@@ -91,8 +91,8 @@ const render = (request: Request): Response => {
 <section class="card" aria-label="Request details">
 <div class="card-head"><span>Connection details</span><span class="status"><span class="dot"></span>Logged</span></div>
 <dl class="rows">${rowMarkup}<div class="row" id="device-location" hidden><dt>Device location</dt><dd role="status"><span id="device-coordinates"></span><span class="accuracy" id="device-accuracy"></span></dd></div></dl>
-<div class="actions"><button class="button" id="copy" type="button">Copy IP</button><button class="button" id="locate" type="button">Use my location</button><a class="button" id="map" href="${escapeHtml(mapUrl)}" target="_blank" rel="noreferrer">Open map</a></div>
-<p class="location-status" id="location-status" role="status" hidden></p>
+<div class="actions"><button class="button" id="copy" type="button">Copy IP</button><a class="button" id="map" href="${escapeHtml(mapUrl)}" target="_blank" rel="noreferrer">Open map</a></div>
+<p class="location-status" id="location-status" role="status">If allowed, location is logged to Cloudflare.</p>
 </section>
 </main>
 <script>
@@ -106,39 +106,33 @@ copyButton.addEventListener('click', async () => {
   }
   setTimeout(() => { copyButton.textContent = 'Copy IP'; }, 1400);
 });
-const locateButton = document.getElementById('locate');
 const locationStatus = document.getElementById('location-status');
 const locationRow = document.getElementById('device-location');
 const mapLink = document.getElementById('map');
-const ipMapUrl = mapLink.href;
-const locationError = (message) => {
-  locationStatus.textContent = message;
-  locationStatus.hidden = false;
-  locateButton.disabled = false;
-  locateButton.textContent = 'Use my location';
-};
-locateButton.addEventListener('click', () => {
-  if (locateButton.disabled) return;
-  locationRow.hidden = true;
-  locationStatus.hidden = true;
-  mapLink.href = ipMapUrl;
-  if (!navigator.geolocation) {
-    locationError('Location unavailable');
-    return;
-  }
-  locateButton.disabled = true;
-  locateButton.textContent = 'Locating…';
-  navigator.geolocation.getCurrentPosition(({ coords }) => {
+if (!navigator.geolocation) {
+  locationStatus.textContent = 'Location unavailable';
+} else {
+  navigator.geolocation.getCurrentPosition(async ({ coords }) => {
     document.getElementById('device-coordinates').textContent = coords.latitude.toFixed(5) + ', ' + coords.longitude.toFixed(5);
     document.getElementById('device-accuracy').textContent = 'Accuracy ±' + Math.ceil(coords.accuracy).toLocaleString() + ' m';
     mapLink.href = 'https://www.openstreetmap.org/?mlat=' + coords.latitude + '&mlon=' + coords.longitude + '#map=16/' + coords.latitude + '/' + coords.longitude;
     locationRow.hidden = false;
-    locateButton.disabled = false;
-    locateButton.textContent = 'Refresh location';
+    locationStatus.textContent = 'Saving location…';
+    try {
+      const response = await fetch('/myipaddress/location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latitude: coords.latitude, longitude: coords.longitude, accuracy: coords.accuracy }),
+      });
+      if (!response.ok || (await response.json()).logged !== true) throw new Error('Not logged');
+      locationStatus.textContent = 'Location logged';
+    } catch {
+      locationStatus.textContent = 'Location not saved · reload to retry';
+    }
   }, (error) => {
-    locationError(error.code === 1 ? 'Location blocked · allow in browser settings' : error.code === 3 ? 'Location timed out · try again' : 'Location unavailable · try again');
+    locationStatus.textContent = error.code === 1 ? 'Location blocked · allow in browser settings' : error.code === 3 ? 'Location timed out · reload to retry' : 'Location unavailable · reload to retry';
   }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
-});
+}
 </script>
 </body></html>`;
 
@@ -149,14 +143,52 @@ locateButton.addEventListener('click', () => {
       "referrer-policy": "no-referrer",
       "permissions-policy": "geolocation=(self)",
       "x-content-type-options": "nosniff",
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     },
   });
+};
+
+const recordLocation = async (request: Request): Promise<Response> => {
+  const reply = (status: number, logged = false) => Response.json({ logged }, {
+    status, headers: { 'cache-control': 'no-store' },
+  });
+  if (request.headers.get('origin') !== new URL(request.url).origin) return reply(403);
+  if (request.headers.get('content-type')?.split(';')[0].trim() !== 'application/json') return reply(415);
+  // Bound the public endpoint's body before parsing or logging it.
+  const reader = request.body?.getReader();
+  if (!reader) return reply(400);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > 1024) { await reader.cancel(); return reply(413); }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  let data;
+  try { data = JSON.parse(new TextDecoder().decode(bytes)); } catch { return reply(400); }
+  if (!data || typeof data !== 'object') return reply(400);
+  const { latitude, longitude, accuracy } = data;
+  if (![latitude, longitude, accuracy].every(value => typeof value === 'number' && Number.isFinite(value)) ||
+      Math.abs(latitude) > 90 || Math.abs(longitude) > 180 || accuracy < 0) return reply(400);
+  console.log(JSON.stringify({
+    event: 'myipaddress.location',
+    source: 'browser',
+    ip: valueOr(request.headers.get('CF-Connecting-IP')),
+    latitude, longitude, accuracy,
+    recordedAt: new Date().toISOString(),
+  }));
+  return reply(200, true);
 };
 
 export default {
   async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === "/myipaddress/location") return recordLocation(request);
     if (request.method !== "GET" || !["", "/myipaddress"].includes(url.pathname.replace(/\/$/, ""))) {
       return new Response("Not found", { status: 404, headers: { "content-type": "text/plain; charset=UTF-8" } });
     }

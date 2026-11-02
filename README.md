@@ -20,8 +20,10 @@ pnpm exec wrangler deploy --dry-run
 
 ## Device location
 
-Use my location requests a single browser location fix after a click and browser permission. The page displays coordinates and accuracy, and Open map uses that location. Refresh location requests a fresh fix. Denied, unavailable, and timeout states allow retry; IP details remain available.
+The page automatically requests one browser location fix on load. The browser requires permission (or an existing grant); the page discloses that allowed location is logged to Cloudflare. No location button, polling, or automatic retries are used. Denial leaves IP details available.
 
-Device coordinates stay in page memory and are never sent to the Worker or its logs. Opening the map shares those coordinates with OpenStreetMap. Reloading clears them. Browser location may use GPS, Wi-Fi, or other device signals; it does not provide a street address. No reverse-geocoding service or new dependency is used.
+After permission, coordinates and accuracy appear and are posted once to the same-origin `/myipaddress/location` endpoint. The Worker validates numeric ranges, JSON content type, origin, and a 1 KiB body limit, then emits `myipaddress.location` to Cloudflare Worker observability with the connecting IP and server timestamp. A successful response changes the status to Location logged; failures stay visible and require reload to retry. Logs use the existing observability retention and sampling settings, not a permanent database.
 
-The page requires HTTPS (localhost also works). Cloudflare zone security challenges occur before this Worker and must be managed separately.
+Browser coordinates are client-provided and can be spoofed. They may come from GPS, Wi-Fi, or other signals and do not provide a street address. Open map shares coordinates with OpenStreetMap. No reverse-geocoding service or new dependency is used.
+
+The page requires HTTPS (localhost also works). Cloudflare zone security challenges occur before this Worker and must be managed separately; a challenge on the POST is shown as a save failure.
